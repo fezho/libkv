@@ -38,8 +38,7 @@ func Register() {
 // New creates a new Zookeeper client given a
 // list of endpoints and an optional tls config
 func New(endpoints []string, options *store.Config) (store.Store, error) {
-	s := &Zookeeper{}
-	s.timeout = defaultTimeout
+	s := &Zookeeper{timeout: defaultTimeout}
 
 	// Set options
 	if options != nil {
@@ -81,27 +80,32 @@ func (s *Zookeeper) Get(key string) (pair *store.KVPair, err error) {
 		return s.Get(store.Normalize(key))
 	}
 
-	pair = &store.KVPair{
+	return &store.KVPair{
 		Key:       key,
 		Value:     resp,
 		LastIndex: uint64(meta.Version),
-	}
-
-	return pair, nil
+	}, nil
 }
 
 // createFullPath creates the entire path for a directory
-// that does not exist
-func (s *Zookeeper) createFullPath(path []string, ephemeral bool) error {
+// that does not exist and sets the value of the last znode to data
+func (s *Zookeeper) createFullPath(path []string, data []byte, ephemeral bool) error {
 	for i := 1; i <= len(path); i++ {
 		newpath := "/" + strings.Join(path[:i], "/")
-		if i == len(path) && ephemeral {
-			_, err := s.client.Create(newpath, []byte{}, zk.FlagEphemeral, zk.WorldACL(zk.PermAll))
+
+		// create leaf node
+		if i == len(path) {
+			flag := int32(0)
+			if ephemeral {
+				flag = zk.FlagEphemeral
+			}
+			_, err := s.client.Create(newpath, data, flag, zk.WorldACL(zk.PermAll))
 			return err
 		}
-		_, err := s.client.Create(newpath, []byte{}, 0, zk.WorldACL(zk.PermAll))
+
+		_, err := s.client.Create(newpath, data, 0, zk.WorldACL(zk.PermAll))
 		if err != nil {
-			// Skip if node already exists
+			// Skip if node already exists in non-leaf node
 			if err != zk.ErrNodeExists {
 				return err
 			}
@@ -112,22 +116,25 @@ func (s *Zookeeper) createFullPath(path []string, ephemeral bool) error {
 
 // Put a value at "key"
 func (s *Zookeeper) Put(key string, value []byte, opts *store.WriteOptions) error {
-	fkey := s.normalize(key)
-
 	exists, err := s.Exists(key)
 	if err != nil {
 		return err
 	}
 
-	if !exists {
-		if opts != nil && opts.TTL > 0 {
-			s.createFullPath(store.SplitKey(strings.TrimSuffix(key, "/")), true) //nolint
-		} else {
-			s.createFullPath(store.SplitKey(strings.TrimSuffix(key, "/")), false) //nolint
-		}
+	if exists {
+		_, err = s.client.Set(s.normalize(key), value, -1)
+		return err
 	}
 
-	_, err = s.client.Set(fkey, value, -1)
+	ephemeral := false
+	if opts != nil && opts.TTL > 0 {
+		ephemeral = true
+	}
+
+	err = s.createFullPath(store.SplitKey(strings.TrimSuffix(key, "/")), value, ephemeral)
+	if err == zk.ErrNodeExists {
+		return nil
+	}
 	return err
 }
 
@@ -155,8 +162,9 @@ func (s *Zookeeper) Exists(key string) (bool, error) {
 // be sent to the channel. Providing a non-nil stopCh can
 // be used to stop watching.
 func (s *Zookeeper) Watch(key string, stopCh <-chan struct{}) (<-chan *store.KVPair, error) {
-	// Get the key first
-	pair, err := s.Get(key)
+	fkey := s.normalize(key)
+	// GetW the key first, if there's error return directly
+	resp, meta, eventCh, err := s.client.GetW(fkey)
 	if err != nil {
 		return nil, err
 	}
@@ -166,23 +174,28 @@ func (s *Zookeeper) Watch(key string, stopCh <-chan struct{}) (<-chan *store.KVP
 	go func() {
 		defer close(watchCh)
 
-		// Get returns the current value to the channel prior
-		// to listening to any event that may occur on that key
-		watchCh <- pair
+		var fireEvt = true
 		for {
-			_, _, eventCh, err := s.client.GetW(s.normalize(key))
-			if err != nil {
-				return
+			if fireEvt {
+				watchCh <- &store.KVPair{
+					Key:       key,
+					Value:     resp,
+					LastIndex: uint64(meta.Version),
+				}
 			}
+
 			select {
 			case e := <-eventCh:
-				if e.Type == zk.EventNodeDataChanged {
-					if entry, err := s.Get(key); err == nil {
-						watchCh <- entry
-					}
-				}
+				// Only fire an event if the data in the node changed.
+				fireEvt = e.Type == zk.EventNodeDataChanged
+				// TODO: if EventNodeDeleted, return nil???
 			case <-stopCh:
 				// There is no way to stop GetW so just quit
+				return
+			}
+
+			resp, meta, eventCh, err = s.client.GetW(s.normalize(key))
+			if err != nil {
 				return
 			}
 		}
@@ -313,7 +326,7 @@ func (s *Zookeeper) AtomicPut(key string, value []byte, previous *store.KVPair, 
 				// Create the directory
 				parts := store.SplitKey(strings.TrimSuffix(key, "/"))
 				parts = parts[:len(parts)-1]
-				if err = s.createFullPath(parts, false); err != nil {
+				if err = s.createFullPath(parts, []byte{}, false); err != nil {
 					// Failed to create the directory.
 					return false, nil, err
 				}
@@ -326,7 +339,6 @@ func (s *Zookeeper) AtomicPut(key string, value []byte, previous *store.KVPair, 
 					}
 					return false, nil, err
 				}
-
 			} else {
 				// Node Exists error (when previous nil)
 				if err == zk.ErrNodeExists {
