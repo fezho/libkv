@@ -423,7 +423,6 @@ func (b *BoltDB) Close() {
 	} else {
 		b.client.Close()
 	}
-	return
 }
 
 // DeleteTree deletes a range of keys with a given prefix

@@ -121,9 +121,9 @@ func (s *Zookeeper) Put(key string, value []byte, opts *store.WriteOptions) erro
 
 	if !exists {
 		if opts != nil && opts.TTL > 0 {
-			s.createFullPath(store.SplitKey(strings.TrimSuffix(key, "/")), true)
+			s.createFullPath(store.SplitKey(strings.TrimSuffix(key, "/")), true) //nolint
 		} else {
-			s.createFullPath(store.SplitKey(strings.TrimSuffix(key, "/")), false)
+			s.createFullPath(store.SplitKey(strings.TrimSuffix(key, "/")), false) //nolint
 		}
 	}
 

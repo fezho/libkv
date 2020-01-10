@@ -55,9 +55,8 @@ type etcdLock struct {
 }
 
 const (
-	periodicSync      = 5 * time.Minute
-	defaultLockTTL    = 20 * time.Second
-	defaultUpdateTime = 5 * time.Second
+	periodicSync   = 5 * time.Minute
+	defaultLockTTL = 20 * time.Second
 )
 
 // Register registers etcd to libkv
@@ -600,5 +599,4 @@ func (l *etcdLock) Unlock() error {
 
 // Close closes the client connection
 func (s *Etcd) Close() {
-	return
 }

@@ -67,6 +67,7 @@ func TestMultiplePersistConnection(t *testing.T) {
 			PersistConnection: true},
 	)
 	assert.Error(t, err)
+	assert.Nil(t, kv)
 
 	_ = os.Remove("/tmp/not_exist_dir/__boltdbtest")
 }
@@ -104,14 +105,14 @@ func TestConcurrentConnection(t *testing.T) {
 	err = kv2.Put(key2, value2, nil)
 	assert.NoError(t, err)
 
-	pair1, err1 := kv1.Get(key1)
+	pair1, err := kv1.Get(key1)
 	assert.NoError(t, err)
 	if assert.NotNil(t, pair1) {
 		assert.NotNil(t, pair1.Value)
 	}
 	assert.Equal(t, pair1.Value, value1)
 
-	pair2, err2 := kv2.Get(key2)
+	pair2, err := kv2.Get(key2)
 	assert.NoError(t, err)
 	if assert.NotNil(t, pair2) {
 		assert.NotNil(t, pair2.Value)

@@ -39,7 +39,7 @@ jobs:
       env:
         GOROOT: ""
       with:
-        args: "run"
+        args: "run -E gofmt"
     - name: Install dependencies
       run: |
         go mod download

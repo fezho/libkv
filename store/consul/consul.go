@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	api "github.com/hashicorp/consul/api"
 	"github.com/fezho/libkv"
 	"github.com/fezho/libkv/store"
+	api "github.com/hashicorp/consul/api"
 )
 
 const (
@@ -145,7 +145,7 @@ func (s *Consul) renewSession(pair *api.KVPair, ttl time.Duration) error {
 		// ephemeral behavior
 		lock, _ := s.client.LockOpts(lockOpts)
 		if lock != nil {
-			lock.Lock(nil)
+			lock.Lock(nil) //nolint
 		}
 	}
 
@@ -554,5 +554,4 @@ func (s *Consul) AtomicDelete(key string, previous *store.KVPair) (bool, error) 
 
 // Close closes the client connection
 func (s *Consul) Close() {
-	return
 }

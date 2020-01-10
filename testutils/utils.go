@@ -90,6 +90,7 @@ func testPutGetDeleteExists(t *testing.T, kv store.Store) {
 	// Get a not exist key should return ErrKeyNotFound
 	pair, err := kv.Get("testPutGetDelete_not_exist_key")
 	assert.Equal(t, store.ErrKeyNotFound, err)
+	assert.Nil(t, pair)
 
 	value := []byte("bar")
 	for _, key := range []string{
@@ -151,12 +152,12 @@ func testWatch(t *testing.T, kv store.Store) {
 	// Update loop
 	go func() {
 		timeout := time.After(1 * time.Second)
-		tick := time.Tick(250 * time.Millisecond)
+		ticker := time.NewTicker(250 * time.Millisecond)
 		for {
 			select {
 			case <-timeout:
 				return
-			case <-tick:
+			case <-ticker.C:
 				err := kv.Put(key, newValue, nil)
 				if assert.NoError(t, err) {
 					continue
@@ -218,13 +219,10 @@ func testWatchTree(t *testing.T, kv store.Store) {
 	// Update loop
 	go func() {
 		timeout := time.After(500 * time.Millisecond)
-		for {
-			select {
-			case <-timeout:
-				err := kv.Delete(node3)
-				assert.NoError(t, err)
-				return
-			}
+		for range timeout {
+			err := kv.Delete(node3)
+			assert.NoError(t, err)
+			return
 		}
 	}()
 
@@ -302,7 +300,7 @@ func testAtomicPutCreate(t *testing.T, kv store.Store) {
 
 	// Attempting to create again should fail.
 	success, _, err = kv.AtomicPut(key, value, nil, nil)
-	assert.Error(t, store.ErrKeyExists)
+	assert.EqualError(t, err, store.ErrKeyExists.Error())
 	assert.False(t, success)
 
 	// This CAS should succeed, since it has the value from Get()
@@ -351,7 +349,7 @@ func testAtomicDelete(t *testing.T, kv store.Store) {
 
 	// Delete a non-existent key; should fail
 	success, err = kv.AtomicDelete(key, pair)
-	assert.Error(t, store.ErrKeyNotFound)
+	assert.EqualError(t, err, store.ErrKeyNotFound.Error())
 	assert.False(t, success)
 }
 
@@ -455,7 +453,7 @@ func testLockTTL(t *testing.T, kv store.Store, otherConn store.Store) {
 	}(done)
 
 	select {
-	case _ = <-done:
+	case <-done:
 		t.Fatal("Lock succeeded on a key that is supposed to be locked by another client")
 	case <-time.After(4 * time.Second):
 		// Stop requesting the lock as we are blocked as expected
@@ -482,7 +480,7 @@ func testLockTTL(t *testing.T, kv store.Store, otherConn store.Store) {
 	}(locked)
 
 	select {
-	case _ = <-locked:
+	case <-locked:
 		break
 	case <-time.After(4 * time.Second):
 		t.Fatal("Unable to take the lock, timed out")
