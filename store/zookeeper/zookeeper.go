@@ -11,9 +11,9 @@ import (
 
 const (
 	// SOH control character
-	SOH = "\x01"
-
+	SOH            = "\x01"
 	defaultTimeout = 10 * time.Second
+	syncRetryLimit = 5
 )
 
 // Zookeeper is the receiver type for
@@ -64,20 +64,11 @@ func (s *Zookeeper) setTimeout(time time.Duration) {
 
 // Get the value at "key", returns the last modified index
 // to use in conjunction to Atomic calls
-func (s *Zookeeper) Get(key string) (pair *store.KVPair, err error) {
-	resp, meta, err := s.client.Get(s.normalize(key))
-
+func (s *Zookeeper) Get(key string) (*store.KVPair, error) {
+	nkey := s.normalize(key)
+	resp, meta, _, err := s.getWithSyncRetry(nkey, false)
 	if err != nil {
-		if err == zk.ErrNoNode {
-			return nil, store.ErrKeyNotFound
-		}
 		return nil, err
-	}
-
-	// FIXME handle very rare cases where Get returns the
-	// SOH control character instead of the actual value
-	if string(resp) == SOH {
-		return s.Get(store.Normalize(key))
 	}
 
 	return &store.KVPair{
@@ -85,33 +76,6 @@ func (s *Zookeeper) Get(key string) (pair *store.KVPair, err error) {
 		Value:     resp,
 		LastIndex: uint64(meta.Version),
 	}, nil
-}
-
-// createFullPath creates the entire path for a directory
-// that does not exist and sets the value of the last znode to data
-func (s *Zookeeper) createFullPath(path []string, data []byte, ephemeral bool) error {
-	for i := 1; i <= len(path); i++ {
-		newpath := "/" + strings.Join(path[:i], "/")
-
-		// create leaf node
-		if i == len(path) {
-			flag := int32(0)
-			if ephemeral {
-				flag = zk.FlagEphemeral
-			}
-			_, err := s.client.Create(newpath, data, flag, zk.WorldACL(zk.PermAll))
-			return err
-		}
-
-		_, err := s.client.Create(newpath, data, 0, zk.WorldACL(zk.PermAll))
-		if err != nil {
-			// Skip if node already exists in non-leaf node
-			if err != zk.ErrNodeExists {
-				return err
-			}
-		}
-	}
-	return nil
 }
 
 // Put a value at "key"
@@ -162,9 +126,9 @@ func (s *Zookeeper) Exists(key string) (bool, error) {
 // be sent to the channel. Providing a non-nil stopCh can
 // be used to stop watching.
 func (s *Zookeeper) Watch(key string, stopCh <-chan struct{}) (<-chan *store.KVPair, error) {
-	fkey := s.normalize(key)
+	nkey := s.normalize(key)
 	// GetW the key first, if there's error return directly
-	resp, meta, eventCh, err := s.client.GetW(fkey)
+	resp, meta, eventCh, err := s.getWithSyncRetry(nkey, true)
 	if err != nil {
 		return nil, err
 	}
@@ -194,8 +158,9 @@ func (s *Zookeeper) Watch(key string, stopCh <-chan struct{}) (<-chan *store.KVP
 				return
 			}
 
-			resp, meta, eventCh, err = s.client.GetW(s.normalize(key))
+			resp, meta, eventCh, err = s.getWithSyncRetry(nkey, true)
 			if err != nil {
+				// TODO: should return the error?
 				return
 			}
 		}
@@ -438,4 +403,60 @@ func (s *Zookeeper) Close() {
 func (s *Zookeeper) normalize(key string) string {
 	key = store.Normalize(key)
 	return strings.TrimSuffix(key, "/")
+}
+
+// getWithSyncRetry re-sync few times if get SOH or empty string
+// caused by creating and writing znodes non-atomically.
+func (s *Zookeeper) getWithSyncRetry(normalizedKey string, watch bool) (resp []byte, meta *zk.Stat, ech <-chan zk.Event, err error) {
+	for i := 0; i <= syncRetryLimit; i++ {
+		if watch {
+			resp, meta, ech, err = s.client.GetW(normalizedKey)
+		} else {
+			resp, meta, err = s.client.Get(normalizedKey)
+		}
+		if err != nil {
+			if err == zk.ErrNoNode {
+				err = store.ErrKeyNotFound
+			}
+			return
+		}
+
+		if string(resp) != SOH && string(resp) != "" {
+			return
+		}
+
+		if i < syncRetryLimit {
+			if _, err = s.client.Sync(normalizedKey); err != nil {
+				return
+			}
+		}
+	}
+	return
+}
+
+// createFullPath creates the entire path for a directory
+// that does not exist and sets the value of the last znode to data
+func (s *Zookeeper) createFullPath(path []string, data []byte, ephemeral bool) error {
+	for i := 1; i <= len(path); i++ {
+		newpath := "/" + strings.Join(path[:i], "/")
+
+		// create leaf node
+		if i == len(path) {
+			flag := int32(0)
+			if ephemeral {
+				flag = zk.FlagEphemeral
+			}
+			_, err := s.client.Create(newpath, data, flag, zk.WorldACL(zk.PermAll))
+			return err
+		}
+
+		_, err := s.client.Create(newpath, data, 0, zk.WorldACL(zk.PermAll))
+		if err != nil {
+			// Skip if node already exists in non-leaf node
+			if err != zk.ErrNodeExists {
+				return err
+			}
+		}
+	}
+	return nil
 }
