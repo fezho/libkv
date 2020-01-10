@@ -1,7 +1,7 @@
 # libkv
 
 [![GoDoc](https://godoc.org/github.com/fezho/libkv?status.png)](https://godoc.org/github.com/fezho/libkv)
-[![Build Status](https://travis-ci.com/fezho/libkv.svg?branch=master)](https://travis-ci.com/fezho/libkv)
+[![Actions Status](https://github.com/fezho/libkv/workflows/Continuous%20Integration/badge.svg)](https://github.com/fezho/libkv/actions)
 [![Coverage Status](https://coveralls.io/repos/fezho/libkv/badge.svg)](https://coveralls.io/r/fezho/libkv)
 [![Go Report Card](https://goreportcard.com/badge/github.com/fezho/libkv)](https://goreportcard.com/report/github.com/fezho/libkv)
 

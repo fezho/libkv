@@ -1,7 +1,0 @@
-#!/bin/bash
-
-output="coverage.out"
-
-echo $output
-go test -test.short -covermode=count -coverprofile=$output ./...
-mv "$output" goverage.report
